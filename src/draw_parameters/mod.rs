@@ -228,6 +228,12 @@ pub enum ProvokingVertex {
     FirstVertex,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PolygonOffset {
+    pub factor: f32,
+    pub units: f32,
+}
+
 /// Represents the parameters to use when drawing.
 ///
 /// Example:
@@ -393,6 +399,8 @@ pub struct DrawParameters<'a> {
     /// If the backend does not support GL_PRIMITIVE_RESTART_FIXED_INDEX, an Error 
     /// of type `FixedIndexRestartingNotSupported` will be returned.
     pub primitive_restart_index: bool,
+
+    pub polygon_offset: Option<PolygonOffset>,
 }
 
 /// Condition whether to render or not.
@@ -460,6 +468,7 @@ impl<'a> Default for DrawParameters<'a> {
             provoking_vertex: ProvokingVertex::LastVertex,
             primitive_bounding_box: (-1.0 .. 1.0, -1.0 .. 1.0, -1.0 .. 1.0, -1.0 .. 1.0),
             primitive_restart_index: false,
+            polygon_offset: None,
         }
     }
 }
@@ -507,6 +516,8 @@ pub fn sync(ctxt: &mut context::CommandContext, draw_parameters: &DrawParameters
     try!(sync_provoking_vertex(ctxt, draw_parameters.provoking_vertex));
     sync_primitive_bounding_box(ctxt, &draw_parameters.primitive_bounding_box);
     try!(sync_primitive_restart_index(ctxt, draw_parameters.primitive_restart_index));
+    sync_primitive_restart_index(ctxt, draw_parameters.primitive_restart_index)?;
+    sync_polygon_offset(ctxt, draw_parameters.polygon_mode, draw_parameters.polygon_offset);
 
     Ok(())
 }
@@ -950,3 +961,51 @@ fn sync_primitive_restart_index(ctxt: &mut context::CommandContext,
 
     Ok(())
 }
+
+fn sync_polygon_offset(ctxt: &mut context::CommandContext,
+                       polygon_mode: PolygonMode,
+                       polygon_offset: Option<PolygonOffset>,) {
+    if let Some(polygon_offset) = polygon_offset {
+        match polygon_mode {
+            PolygonMode::Fill => {
+                if !ctxt.state.enabled_polygon_offset_fill {
+                    unsafe { ctxt.gl.Enable(gl::POLYGON_OFFSET_FILL); }
+                    ctxt.state.enabled_polygon_offset_fill = true;
+                }
+            }
+            PolygonMode::Line => {
+                if !ctxt.state.enabled_polygon_offset_line {
+                    unsafe { ctxt.gl.Enable(gl::POLYGON_OFFSET_LINE); }
+                    ctxt.state.enabled_polygon_offset_line = true;
+                }
+            }
+            PolygonMode::Point => {
+                if !ctxt.state.enabled_polygon_offset_point {
+                    unsafe { ctxt.gl.Enable(gl::POLYGON_OFFSET_POINT); }
+                    ctxt.state.enabled_polygon_offset_point = true;
+                }
+            }
+        }
+
+        if (polygon_offset.factor, polygon_offset.units) != ctxt.state.polygon_offset {
+            unsafe { ctxt.gl.PolygonOffset(polygon_offset.factor, polygon_offset.units); }
+            ctxt.state.polygon_offset = (polygon_offset.factor, polygon_offset.units);
+        }
+    } 
+
+    if ctxt.state.enabled_polygon_offset_fill && (polygon_offset.is_none() || polygon_mode != PolygonMode::Fill) {
+        unsafe { ctxt.gl.Disable(gl::POLYGON_OFFSET_FILL); }
+        ctxt.state.enabled_polygon_offset_fill = false;
+    }
+
+    if ctxt.state.enabled_polygon_offset_line && (polygon_offset.is_none() || polygon_mode != PolygonMode::Line) {
+        unsafe { ctxt.gl.Disable(gl::POLYGON_OFFSET_LINE); }
+        ctxt.state.enabled_polygon_offset_line = false;
+    }
+
+    if ctxt.state.enabled_polygon_offset_point && (polygon_offset.is_none() || polygon_mode != PolygonMode::Point) {
+        unsafe { ctxt.gl.Disable(gl::POLYGON_OFFSET_POINT); }
+        ctxt.state.enabled_polygon_offset_point = false;
+    }
+}
+
